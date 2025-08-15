@@ -34,12 +34,13 @@ export function getApolloClient(): ApolloClient<NormalizedCacheObject> {
   });
 
   // Create auth link to add authorization header
+  // Linear API expects just the API key for personal API keys (not Bearer prefix)
   const authLink = setContext((_, { headers }) => {
     return {
       headers: {
         ...headers,
-        authorization: apiKey,
-        'content-type': 'application/json',
+        Authorization: apiKey,
+        'Content-Type': 'application/json',
       },
     };
   });

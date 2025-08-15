@@ -3,12 +3,21 @@ import { fetchDashboardData } from '@/lib/linear-api';
 
 export async function GET() {
   try {
+    console.log('API Route: Starting dashboard data fetch...');
     const data = await fetchDashboardData();
+    console.log('API Route: Successfully fetched dashboard data');
     return NextResponse.json(data);
   } catch (error) {
-    console.error('API Error:', error);
+    console.error('API Route Error:', error);
+
+    // Log more detailed error information
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+
     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch dashboard data';
-    
+
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }

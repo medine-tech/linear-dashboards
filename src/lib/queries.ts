@@ -4,6 +4,17 @@ import { gql } from '@apollo/client';
  * GraphQL queries for Linear API
  */
 
+// Simple test query to verify API connection
+export const GET_VIEWER = gql`
+  query GetViewer {
+    viewer {
+      id
+      name
+      email
+    }
+  }
+`;
+
 export const GET_TEAMS = gql`
   query GetTeams {
     teams {
@@ -11,9 +22,6 @@ export const GET_TEAMS = gql`
         id
         name
         key
-        description
-        color
-        icon
       }
     }
   }
@@ -121,6 +129,8 @@ export const GET_TEAM_CURRENT_CYCLE_ISSUES = gql`
   }
 `;
 
+// Corrected query based on Linear API documentation
+// Note: activeCycle doesn't have direct access to issues, we need to query them separately
 export const GET_ALL_TEAMS_WITH_CYCLES = gql`
   query GetAllTeamsWithCycles {
     teams {
@@ -128,46 +138,35 @@ export const GET_ALL_TEAMS_WITH_CYCLES = gql`
         id
         name
         key
-        description
-        color
-        icon
         activeCycle {
           id
           number
           name
-          description
           startsAt
           endsAt
-          completedAt
-          progress
-          scopeHistory
-          completedScopeHistory
-          inProgressScopeHistory
-          issues {
-            nodes {
-              id
-              identifier
-              title
-              priority
-              estimate
-              state {
-                id
-                name
-                type
-                color
-              }
-              assignee {
-                id
-                name
-                email
-                avatarUrl
-              }
-              createdAt
-              updatedAt
-              completedAt
-            }
-          }
         }
+      }
+    }
+  }
+`;
+
+// Separate query to get issues for a specific cycle
+export const GET_CYCLE_ISSUES_BY_ID = gql`
+  query GetCycleIssues($cycleId: String!) {
+    issues(filter: { cycle: { id: { eq: $cycleId } } }) {
+      nodes {
+        id
+        title
+        state {
+          id
+          name
+          type
+        }
+        assignee {
+          id
+          name
+        }
+        createdAt
       }
     }
   }

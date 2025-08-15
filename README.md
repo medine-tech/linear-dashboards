@@ -64,8 +64,39 @@ If you encounter a "LINEAR_API_KEY environment variable is required" error:
 3. **Test environment variable loading:**
    Visit `http://localhost:3000/api/test-env` to verify your API key is being read correctly.
 
-4. **Check file location:**
+4. **Test Linear API connection:**
+   Visit `http://localhost:3000/api/test-linear` to test the actual Linear API connection.
+
+   Expected response:
+   ```json
+   {
+     "success": true,
+     "message": "Linear API connection successful",
+     "viewer": {
+       "id": "...",
+       "name": "Your Name",
+       "email": "your@email.com"
+     }
+   }
+   ```
+
+5. **Debug GraphQL queries:**
+   Visit `http://localhost:3000/api/debug-linear` to run comprehensive tests of different GraphQL queries.
+
+   This will test:
+   - Simple viewer query
+   - Basic teams query
+   - Teams with active cycles query
+
+   Each test shows detailed error information if it fails.
+
+5. **Check file location:**
    Ensure `.env.local` is in the project root directory (same level as `package.json`).
+
+6. **Common API Issues:**
+   - **400 Bad Request**: Check that your API key is valid and has the correct permissions
+   - **401 Unauthorized**: Verify your API key is correctly formatted in `.env.local`
+   - **Rate limiting**: Linear has API rate limits - wait a moment and try again
 
 ## Project Structure
 
