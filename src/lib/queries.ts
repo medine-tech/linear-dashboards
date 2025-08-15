@@ -129,8 +129,7 @@ export const GET_TEAM_CURRENT_CYCLE_ISSUES = gql`
   }
 `;
 
-// Corrected query based on Linear API documentation
-// Note: activeCycle doesn't have direct access to issues, we need to query them separately
+// Enhanced query to include team estimation settings
 export const GET_ALL_TEAMS_WITH_CYCLES = gql`
   query GetAllTeamsWithCycles {
     teams {
@@ -138,6 +137,9 @@ export const GET_ALL_TEAMS_WITH_CYCLES = gql`
         id
         name
         key
+        issueEstimationType
+        issueEstimationAllowZero
+        issueEstimationExtended
         activeCycle {
           id
           number
@@ -150,8 +152,7 @@ export const GET_ALL_TEAMS_WITH_CYCLES = gql`
   }
 `;
 
-// Corrected query to get issues for a specific cycle
-// Based on Linear API docs, we need to query the cycle directly and get its issues
+// Enhanced query to include issue estimates for proper metric calculation
 export const GET_CYCLE_ISSUES_BY_ID = gql`
   query GetCycleIssues($cycleId: String!) {
     cycle(id: $cycleId) {
@@ -160,6 +161,33 @@ export const GET_CYCLE_ISSUES_BY_ID = gql`
         nodes {
           id
           title
+          estimate
+          state {
+            id
+            name
+            type
+          }
+          assignee {
+            id
+            name
+          }
+          createdAt
+        }
+      }
+    }
+  }
+`;
+
+// Query for teams using story point estimation - excludes unestimated issues
+export const GET_CYCLE_ISSUES_WITH_ESTIMATES = gql`
+  query GetCycleIssuesWithEstimates($cycleId: String!) {
+    cycle(id: $cycleId) {
+      id
+      issues(filter: { estimate: { gt: 0 } }) {
+        nodes {
+          id
+          title
+          estimate
           state {
             id
             name

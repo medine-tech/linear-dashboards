@@ -16,6 +16,9 @@ export interface LinearTeam {
   description?: string;
   color?: string;
   icon?: string;
+  issueEstimationType?: string;
+  issueEstimationAllowZero?: boolean;
+  issueEstimationExtended?: boolean;
 }
 
 export interface LinearCycle {
@@ -65,6 +68,8 @@ export interface TeamMetrics {
   scopePercentage: number;
   startedPercentage: number;
   completedPercentage: number;
+  usesEstimation: boolean;
+  metricType: 'issues' | 'story_points';
 }
 
 export interface DashboardData {

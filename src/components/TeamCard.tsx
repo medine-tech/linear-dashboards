@@ -5,7 +5,16 @@ interface TeamCardProps {
 }
 
 export default function TeamCard({ teamMetrics }: TeamCardProps) {
-  const { team, cycle, scope, started, completed, startedPercentage, completedPercentage } = teamMetrics;
+  const {
+    team,
+    cycle,
+    scope,
+    started,
+    completed,
+    startedPercentage,
+    completedPercentage,
+    usesEstimation
+  } = teamMetrics;
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -26,18 +35,27 @@ export default function TeamCard({ teamMetrics }: TeamCardProps) {
     return 'bg-red-500';
   };
 
+  const getMetricLabel = () => {
+    return usesEstimation ? 'Story Points' : 'Issues';
+  };
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
       {/* Team Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3">
-          <div 
+          <div
             className="w-4 h-4 rounded-full"
             style={{ backgroundColor: team.color || '#6366f1' }}
           />
           <div>
             <h3 className="text-lg font-semibold text-gray-900">{team.name}</h3>
-            <p className="text-sm text-gray-500">{team.key}</p>
+            <div className="flex items-center space-x-2">
+              <p className="text-sm text-gray-500">{team.key}</p>
+              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
+                {getMetricLabel()}
+              </span>
+            </div>
           </div>
         </div>
         {cycle && (
@@ -64,6 +82,9 @@ export default function TeamCard({ teamMetrics }: TeamCardProps) {
             <div className="text-center">
               <div className="text-2xl font-bold text-gray-900">{scope}</div>
               <div className="text-sm text-gray-500">Scope</div>
+              <div className="text-xs text-gray-400">
+                {usesEstimation ? 'points' : 'issues'}
+              </div>
             </div>
             <div className="text-center">
               <div className={`text-2xl font-bold ${getStatusColor(startedPercentage)}`}>

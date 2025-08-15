@@ -94,6 +94,17 @@ If you encounter a "LINEAR_API_KEY environment variable is required" error:
    - Network errors with status codes
    - Specific Linear API error messages
 
+6. **Debug specific team metrics:**
+   Visit `http://localhost:3000/api/debug-pensa-live` to debug the Pensa - Live team specifically.
+
+   This endpoint will:
+   - Find the Pensa - Live team and show its estimation settings
+   - Fetch all issues in the active cycle with detailed information
+   - Calculate both story point and issue count metrics
+   - Show issue-by-issue analysis with estimates and states
+   - Compare metrics including all issues vs. estimated issues only
+   - List unestimated issues that are excluded from story point calculations
+
 5. **Check file location:**
    Ensure `.env.local` is in the project root directory (same level as `package.json`).
 
@@ -128,13 +139,24 @@ src/
 
 ## Team Metrics
 
-For each team with an active cycle, the dashboard displays:
+The dashboard automatically detects each team's estimation method and displays appropriate metrics:
 
+### Teams Using Issue Count (e.g., Support teams):
 - **Scope**: Total number of issues planned for the cycle
 - **Started**: Number of issues currently in progress
 - **Completed**: Number of finished/closed issues
+
+### Teams Using Story Point Estimation (e.g., Development teams):
+- **Scope**: Total story points planned for the cycle (excludes unestimated issues)
+- **Started**: Sum of story points for issues in progress (only estimated issues)
+- **Completed**: Sum of story points for finished issues (only estimated issues)
+- **Note**: Issues with estimate = 0 or null are excluded from all calculations
+
+### Additional Information:
 - **Progress Bars**: Visual representation of started and completion percentages
 - **Cycle Information**: Current cycle number and date range
+- **Metric Type Badge**: Shows whether the team uses "Issues" or "Story Points"
+- **Automatic Detection**: The dashboard queries Linear's team settings to determine the correct calculation method
 
 ## API Integration
 

@@ -12,13 +12,17 @@ const SIMPLE_VIEWER = gql`
   }
 `;
 
-// Simple teams query
-const SIMPLE_TEAMS = gql`
-  query SimpleTeams {
+// Enhanced teams query with estimation settings
+const TEAMS_WITH_ESTIMATION = gql`
+  query TeamsWithEstimation {
     teams {
       nodes {
         id
         name
+        key
+        issueEstimationType
+        issueEstimationAllowZero
+        issueEstimationExtended
       }
     }
   }
@@ -79,11 +83,11 @@ export async function GET() {
       console.log('❌ Simple viewer query failed:', error instanceof Error ? error.message : 'Unknown error');
     }
 
-    // Test 2: Simple teams query
-    console.log('\n=== Test 2: Simple Teams Query ===');
+    // Test 2: Teams with estimation settings query
+    console.log('\n=== Test 2: Teams with Estimation Settings ===');
     try {
       const { data, error } = await apolloClient.query({
-        query: SIMPLE_TEAMS,
+        query: TEAMS_WITH_ESTIMATION,
         fetchPolicy: 'no-cache',
       });
 
@@ -92,16 +96,23 @@ export async function GET() {
       }
 
       results.tests.push({
-        name: 'Simple Teams Query',
+        name: 'Teams with Estimation Settings',
         status: 'PASSED',
         data: data
       });
       results.summary.passed++;
-      console.log('✅ Simple teams query successful');
+      console.log('✅ Teams with estimation settings query successful');
+
+      // Log estimation settings for each team
+      if (data?.teams?.nodes) {
+        data.teams.nodes.forEach((team: { name: string; issueEstimationType?: string }) => {
+          console.log(`Team ${team.name}: estimation type = ${team.issueEstimationType || 'notUsed'}`);
+        });
+      }
 
     } catch (error: unknown) {
       results.tests.push({
-        name: 'Simple Teams Query',
+        name: 'Teams with Estimation Settings',
         status: 'FAILED',
         error: {
           message: error instanceof Error ? error.message : 'Unknown error',
@@ -110,7 +121,7 @@ export async function GET() {
         }
       });
       results.summary.failed++;
-      console.log('❌ Simple teams query failed:', error instanceof Error ? error.message : 'Unknown error');
+      console.log('❌ Teams with estimation settings query failed:', error instanceof Error ? error.message : 'Unknown error');
     }
 
     // Test 3: Teams with activeCycle (without issues)
@@ -184,6 +195,7 @@ export async function GET() {
               nodes {
                 id
                 title
+                estimate
                 state {
                   id
                   name
