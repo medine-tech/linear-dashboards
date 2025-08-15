@@ -168,9 +168,53 @@ export async function fetchDashboardData(): Promise<DashboardData> {
 
           if (issuesError) {
             console.error(`Error fetching issues for cycle ${cycle.id}:`, issuesError);
-          } else if (issuesData?.issues?.nodes) {
-            console.log(`Found ${issuesData.issues.nodes.length} issues for cycle ${cycle.id}`);
-            issues = issuesData.issues.nodes.map((issueData: {
+
+            // Extract detailed error information for issues query
+            if (issuesError.networkError) {
+              const networkError = issuesError.networkError as {
+                name?: string;
+                message?: string;
+                statusCode?: number;
+                result?: { errors?: Array<{ message: string; locations?: unknown; path?: unknown; extensions?: unknown }> };
+              };
+
+              console.error('Issues Query Network Error Details:', {
+                name: networkError.name,
+                message: networkError.message,
+                statusCode: networkError.statusCode,
+                result: networkError.result
+              });
+
+              // Log the actual GraphQL errors from Linear API for issues query
+              const networkResult = networkError.result;
+              if (networkResult?.errors) {
+                console.error('Linear API Issues Query GraphQL Errors:');
+                networkResult.errors.forEach((gqlError, index: number) => {
+                  console.error(`Issues Error ${index + 1}:`, {
+                    message: gqlError.message,
+                    locations: gqlError.locations,
+                    path: gqlError.path,
+                    extensions: gqlError.extensions
+                  });
+                });
+              }
+            }
+
+            // Log individual GraphQL errors for issues query
+            if (issuesError.graphQLErrors && issuesError.graphQLErrors.length > 0) {
+              console.error('Issues Query GraphQL Errors from response:');
+              issuesError.graphQLErrors.forEach((gqlError, index) => {
+                console.error(`Issues GraphQL Error ${index + 1}:`, {
+                  message: gqlError.message,
+                  locations: gqlError.locations,
+                  path: gqlError.path,
+                  extensions: gqlError.extensions
+                });
+              });
+            }
+          } else if (issuesData?.cycle?.issues?.nodes) {
+            console.log(`Found ${issuesData.cycle.issues.nodes.length} issues for cycle ${cycle.id}`);
+            issues = issuesData.cycle.issues.nodes.map((issueData: {
               id: string;
               identifier?: string;
               title: string;

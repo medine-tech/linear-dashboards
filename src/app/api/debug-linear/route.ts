@@ -28,7 +28,7 @@ export async function GET() {
   const results: {
     tests: Array<{
       name: string;
-      status: 'PASSED' | 'FAILED';
+      status: 'PASSED' | 'FAILED' | 'SKIPPED';
       data?: unknown;
       error?: unknown;
     }>;
@@ -161,6 +161,79 @@ export async function GET() {
       });
       results.summary.failed++;
       console.log('❌ Teams with active cycle query failed:', error instanceof Error ? error.message : 'Unknown error');
+    }
+
+    // Test 4: Cycle Issues Query (if we have a cycle from previous test)
+    console.log('\n=== Test 4: Cycle Issues Query ===');
+    let cycleId: string | null = null;
+
+    // Try to get a cycle ID from the previous test
+    const teamsWithCycleTest = results.tests.find(test => test.name === 'Teams with Active Cycle');
+    if (teamsWithCycleTest && teamsWithCycleTest.status === 'PASSED' && teamsWithCycleTest.data) {
+      const teamsData = teamsWithCycleTest.data as { teams: { nodes: Array<{ activeCycle?: { id: string } }> } };
+      const teamWithCycle = teamsData.teams.nodes.find(team => team.activeCycle);
+      cycleId = teamWithCycle?.activeCycle?.id || null;
+    }
+
+    if (cycleId) {
+      const CYCLE_ISSUES = gql`
+        query GetCycleIssues($cycleId: String!) {
+          cycle(id: $cycleId) {
+            id
+            issues {
+              nodes {
+                id
+                title
+                state {
+                  id
+                  name
+                  type
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      try {
+        const { data, error } = await apolloClient.query({
+          query: CYCLE_ISSUES,
+          variables: { cycleId },
+          fetchPolicy: 'no-cache',
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        results.tests.push({
+          name: 'Cycle Issues Query',
+          status: 'PASSED',
+          data: data
+        });
+        results.summary.passed++;
+        console.log('✅ Cycle issues query successful');
+
+      } catch (error: unknown) {
+        results.tests.push({
+          name: 'Cycle Issues Query',
+          status: 'FAILED',
+          error: {
+            message: error instanceof Error ? error.message : 'Unknown error',
+            graphQLErrors: (error as { graphQLErrors?: unknown }).graphQLErrors,
+            networkError: (error as { networkError?: { message?: string; statusCode?: number; result?: unknown } }).networkError
+          }
+        });
+        results.summary.failed++;
+        console.log('❌ Cycle issues query failed:', error instanceof Error ? error.message : 'Unknown error');
+      }
+    } else {
+      results.tests.push({
+        name: 'Cycle Issues Query',
+        status: 'SKIPPED',
+        error: 'No cycle ID available from previous tests'
+      });
+      console.log('⏭️ Cycle issues query skipped - no cycle ID available');
     }
 
     console.log('\n=== Debug Test Summary ===');

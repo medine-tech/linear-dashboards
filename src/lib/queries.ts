@@ -150,23 +150,27 @@ export const GET_ALL_TEAMS_WITH_CYCLES = gql`
   }
 `;
 
-// Separate query to get issues for a specific cycle
+// Corrected query to get issues for a specific cycle
+// Based on Linear API docs, we need to query the cycle directly and get its issues
 export const GET_CYCLE_ISSUES_BY_ID = gql`
   query GetCycleIssues($cycleId: String!) {
-    issues(filter: { cycle: { id: { eq: $cycleId } } }) {
-      nodes {
-        id
-        title
-        state {
+    cycle(id: $cycleId) {
+      id
+      issues {
+        nodes {
           id
-          name
-          type
+          title
+          state {
+            id
+            name
+            type
+          }
+          assignee {
+            id
+            name
+          }
+          createdAt
         }
-        assignee {
-          id
-          name
-        }
-        createdAt
       }
     }
   }

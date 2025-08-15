@@ -84,11 +84,15 @@ If you encounter a "LINEAR_API_KEY environment variable is required" error:
    Visit `http://localhost:3000/api/debug-linear` to run comprehensive tests of different GraphQL queries.
 
    This will test:
-   - Simple viewer query
-   - Basic teams query
-   - Teams with active cycles query
+   - Simple viewer query (authentication test)
+   - Basic teams query (teams access test)
+   - Teams with active cycles query (cycle access test)
+   - Cycle issues query (issues fetching test)
 
-   Each test shows detailed error information if it fails.
+   Each test shows detailed error information if it fails, including:
+   - GraphQL validation errors
+   - Network errors with status codes
+   - Specific Linear API error messages
 
 5. **Check file location:**
    Ensure `.env.local` is in the project root directory (same level as `package.json`).
