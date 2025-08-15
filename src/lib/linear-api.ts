@@ -48,11 +48,6 @@ function calculateTeamMetrics(
   const usesEstimation = teamUsesEstimation(team);
   const metricType: 'issues' | 'story_points' = usesEstimation ? 'story_points' : 'issues';
 
-  console.log(`Calculating metrics for team ${team.name}:`);
-  console.log(`- Uses estimation: ${usesEstimation}`);
-  console.log(`- Estimation type: ${team.issueEstimationType}`);
-  console.log(`- Total issues: ${issues.length}`);
-
   let scope: number;
   let started: number;
   let completed: number;
@@ -60,33 +55,21 @@ function calculateTeamMetrics(
   if (usesEstimation) {
     // Sum story points (estimates) for teams using estimation
     // Only include issues with estimate > 0 to exclude unestimated work
-    console.log('Using story point calculation (excluding unestimated issues)');
-
     const estimatedIssues = issues.filter(issue => (issue.estimate || 0) > 0);
-    console.log(`  Total issues: ${issues.length}, estimated issues: ${estimatedIssues.length}`);
 
-    scope = estimatedIssues.reduce((sum, issue) => {
-      const estimate = issue.estimate || 0;
-      console.log(`  Issue ${issue.identifier}: estimate=${estimate}, state=${issue.state.type}`);
-      return sum + estimate;
-    }, 0);
-
-    const startedIssues = estimatedIssues.filter(issue => isStartedState(issue.state));
-    started = startedIssues.reduce((sum, issue) => sum + (issue.estimate || 0), 0);
-    console.log(`  Started issues: ${startedIssues.length}, total points: ${started}`);
-
-    const completedIssues = estimatedIssues.filter(issue => isCompletedState(issue.state));
-    completed = completedIssues.reduce((sum, issue) => sum + (issue.estimate || 0), 0);
-    console.log(`  Completed issues: ${completedIssues.length}, total points: ${completed}`);
+    scope = estimatedIssues.reduce((sum, issue) => sum + (issue.estimate || 0), 0);
+    started = estimatedIssues
+      .filter(issue => isStartedState(issue.state))
+      .reduce((sum, issue) => sum + (issue.estimate || 0), 0);
+    completed = estimatedIssues
+      .filter(issue => isCompletedState(issue.state))
+      .reduce((sum, issue) => sum + (issue.estimate || 0), 0);
   } else {
     // Count issues for teams not using estimation
-    console.log('Using issue count calculation');
     scope = issues.length;
     started = issues.filter(issue => isStartedState(issue.state)).length;
     completed = issues.filter(issue => isCompletedState(issue.state)).length;
   }
-
-  console.log(`Final metrics: scope=${scope}, started=${started}, completed=${completed}`);
 
   const scopePercentage = scope > 0 ? 100 : 0;
   const startedPercentage = scope > 0 ? Math.round((started / scope) * 100) : 0;
@@ -111,78 +94,45 @@ function calculateTeamMetrics(
  */
 export async function fetchDashboardData(): Promise<DashboardData> {
   try {
-    console.log('Creating Apollo client...');
     const apolloClient = getApolloClient();
 
-    console.log('Executing GraphQL query...');
     const { data, error } = await apolloClient.query({
       query: GET_ALL_TEAMS_WITH_CYCLES,
-      fetchPolicy: 'no-cache', // Use no-cache for debugging
+      fetchPolicy: 'no-cache',
     });
 
     if (error) {
-      console.error('GraphQL Error details:', {
-        message: error.message,
-        graphQLErrors: error.graphQLErrors,
-        networkError: error.networkError,
-        extraInfo: error.extraInfo
-      });
+      console.error('Linear API Error:', error.message);
 
-      // Extract detailed error information from networkError
+      // Log network errors for production debugging
       if (error.networkError) {
-        console.error('Network Error Details:', {
-          name: error.networkError.name,
-          message: error.networkError.message,
-          statusCode: (error.networkError as { statusCode?: number }).statusCode,
-          result: (error.networkError as { result?: unknown }).result
-        });
+        const networkError = error.networkError as {
+          statusCode?: number;
+          result?: { errors?: Array<{ message: string }> };
+        };
 
-        // Log the actual GraphQL errors from Linear API
-        const networkResult = (error.networkError as { result?: { errors?: Array<{ message: string; locations?: unknown; path?: unknown; extensions?: unknown }> } }).result;
-        if (networkResult?.errors) {
-          console.error('Linear API GraphQL Errors:');
-          networkResult.errors.forEach((gqlError, index: number) => {
-            console.error(`Error ${index + 1}:`, {
-              message: gqlError.message,
-              locations: gqlError.locations,
-              path: gqlError.path,
-              extensions: gqlError.extensions
-            });
+        if (networkError.statusCode) {
+          console.error(`HTTP ${networkError.statusCode} error from Linear API`);
+        }
+
+        if (networkError.result?.errors) {
+          networkError.result.errors.forEach((gqlError) => {
+            console.error('Linear API Error:', gqlError.message);
           });
         }
-      }
-
-      // Log individual GraphQL errors
-      if (error.graphQLErrors && error.graphQLErrors.length > 0) {
-        console.error('GraphQL Errors from response:');
-        error.graphQLErrors.forEach((gqlError, index) => {
-          console.error(`GraphQL Error ${index + 1}:`, {
-            message: gqlError.message,
-            locations: gqlError.locations,
-            path: gqlError.path,
-            extensions: gqlError.extensions
-          });
-        });
       }
 
       throw new Error(`Failed to fetch teams data: ${error.message}`);
     }
 
-    console.log('Raw GraphQL response:', JSON.stringify(data, null, 2));
-
     if (!data?.teams?.nodes) {
-      console.error('Invalid data structure received:', data);
       throw new Error('No teams data received from Linear API');
     }
-
-    console.log(`Found ${data.teams.nodes.length} teams`);
 
     // Process teams and fetch issues for each active cycle
     const teams: TeamMetrics[] = [];
 
     for (const teamData of data.teams.nodes) {
-      console.log(`Processing team: ${teamData.name} (${teamData.id})`);
-
       const team: LinearTeam = {
         id: teamData.id,
         name: teamData.name,
@@ -196,8 +146,6 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       let issues: LinearIssue[] = [];
 
       if (teamData.activeCycle) {
-        console.log(`Team ${teamData.name} has active cycle: ${teamData.activeCycle.name || teamData.activeCycle.number}`);
-
         cycle = {
           id: teamData.activeCycle.id,
           number: teamData.activeCycle.number,
@@ -213,11 +161,8 @@ export async function fetchDashboardData(): Promise<DashboardData> {
 
         // Fetch issues for this cycle using appropriate query based on estimation settings
         try {
-          console.log(`Fetching issues for cycle ${cycle.id}...`);
           const usesEstimation = teamUsesEstimation(team);
           const issuesQuery = usesEstimation ? GET_CYCLE_ISSUES_WITH_ESTIMATES : GET_CYCLE_ISSUES_BY_ID;
-
-          console.log(`Using ${usesEstimation ? 'estimation-filtered' : 'all-issues'} query for team ${team.name}`);
 
           const { data: issuesData, error: issuesError } = await apolloClient.query({
             query: issuesQuery,
@@ -226,53 +171,8 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           });
 
           if (issuesError) {
-            console.error(`Error fetching issues for cycle ${cycle.id}:`, issuesError);
-
-            // Extract detailed error information for issues query
-            if (issuesError.networkError) {
-              const networkError = issuesError.networkError as {
-                name?: string;
-                message?: string;
-                statusCode?: number;
-                result?: { errors?: Array<{ message: string; locations?: unknown; path?: unknown; extensions?: unknown }> };
-              };
-
-              console.error('Issues Query Network Error Details:', {
-                name: networkError.name,
-                message: networkError.message,
-                statusCode: networkError.statusCode,
-                result: networkError.result
-              });
-
-              // Log the actual GraphQL errors from Linear API for issues query
-              const networkResult = networkError.result;
-              if (networkResult?.errors) {
-                console.error('Linear API Issues Query GraphQL Errors:');
-                networkResult.errors.forEach((gqlError, index: number) => {
-                  console.error(`Issues Error ${index + 1}:`, {
-                    message: gqlError.message,
-                    locations: gqlError.locations,
-                    path: gqlError.path,
-                    extensions: gqlError.extensions
-                  });
-                });
-              }
-            }
-
-            // Log individual GraphQL errors for issues query
-            if (issuesError.graphQLErrors && issuesError.graphQLErrors.length > 0) {
-              console.error('Issues Query GraphQL Errors from response:');
-              issuesError.graphQLErrors.forEach((gqlError, index) => {
-                console.error(`Issues GraphQL Error ${index + 1}:`, {
-                  message: gqlError.message,
-                  locations: gqlError.locations,
-                  path: gqlError.path,
-                  extensions: gqlError.extensions
-                });
-              });
-            }
+            console.error(`Error fetching issues for cycle ${cycle.id}:`, issuesError.message);
           } else if (issuesData?.cycle?.issues?.nodes) {
-            console.log(`Found ${issuesData.cycle.issues.nodes.length} issues for cycle ${cycle.id}`);
             issues = issuesData.cycle.issues.nodes.map((issueData: {
               id: string;
               identifier?: string;
@@ -308,15 +208,11 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           console.error(`Failed to fetch issues for cycle ${cycle.id}:`, issueError);
           // Continue processing other teams even if one cycle fails
         }
-      } else {
-        console.log(`Team ${teamData.name} has no active cycle`);
       }
 
       const teamMetrics = calculateTeamMetrics(team, cycle, issues);
       teams.push(teamMetrics);
     }
-
-    console.log(`Processed ${teams.length} teams successfully`);
 
     return {
       teams,

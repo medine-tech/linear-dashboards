@@ -64,46 +64,8 @@ If you encounter a "LINEAR_API_KEY environment variable is required" error:
 3. **Test environment variable loading:**
    Visit `http://localhost:3000/api/test-env` to verify your API key is being read correctly.
 
-4. **Test Linear API connection:**
-   Visit `http://localhost:3000/api/test-linear` to test the actual Linear API connection.
-
-   Expected response:
-   ```json
-   {
-     "success": true,
-     "message": "Linear API connection successful",
-     "viewer": {
-       "id": "...",
-       "name": "Your Name",
-       "email": "your@email.com"
-     }
-   }
-   ```
-
-5. **Debug GraphQL queries:**
-   Visit `http://localhost:3000/api/debug-linear` to run comprehensive tests of different GraphQL queries.
-
-   This will test:
-   - Simple viewer query (authentication test)
-   - Basic teams query (teams access test)
-   - Teams with active cycles query (cycle access test)
-   - Cycle issues query (issues fetching test)
-
-   Each test shows detailed error information if it fails, including:
-   - GraphQL validation errors
-   - Network errors with status codes
-   - Specific Linear API error messages
-
-6. **Debug specific team metrics:**
-   Visit `http://localhost:3000/api/debug-pensa-live` to debug the Pensa - Live team specifically.
-
-   This endpoint will:
-   - Find the Pensa - Live team and show its estimation settings
-   - Fetch all issues in the active cycle with detailed information
-   - Calculate both story point and issue count metrics
-   - Show issue-by-issue analysis with estimates and states
-   - Compare metrics including all issues vs. estimated issues only
-   - List unestimated issues that are excluded from story point calculations
+4. **Access the dashboard:**
+   Visit `http://localhost:3000` to view the Linear dashboard with team metrics.
 
 5. **Check file location:**
    Ensure `.env.local` is in the project root directory (same level as `package.json`).
