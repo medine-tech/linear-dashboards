@@ -204,6 +204,8 @@ export const GET_CYCLE_ISSUES_WITH_ESTIMATES = gql`
     }
   }
 
+`;
+
 // Combined query to fetch teams, active cycles, and first page of issues
 export const GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES = gql`
   query GetTeamsWithActiveCycleIssues($issuesPage: Int = 200) {

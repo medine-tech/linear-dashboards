@@ -62,7 +62,7 @@ export interface LinearIssue {
   identifier: string;
   title: string;
   description?: string;
-  priority: number;
+  priority?: number;
   estimate?: number;
   state: LinearIssueState;
   team: LinearTeam;

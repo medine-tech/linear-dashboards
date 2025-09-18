@@ -1,12 +1,12 @@
 import { getApolloClient } from './apollo-client';
 import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_MORE_CYCLE_ISSUES, GET_TEAMS_LEADS } from './queries';
 import type {
-  TeamMetrics, 
-  DashboardData, 
-  LinearTeam, 
-  LinearCycle, 
+  TeamMetrics,
+  DashboardData,
+  LinearTeam,
+  LinearCycle,
   LinearIssue,
-  LinearIssueState 
+  LinearIssueState
 } from '@/types/linear';
 
 /**
@@ -118,20 +118,57 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     }
 
     // Best-effort: fetch leads for all teams in one call; ignore if unsupported
-    let leadsByTeam = new Map<string, { id: string; name: string }>();
+    const leadsByTeam = new Map<string, { id: string; name: string }>();
     try {
       const { data: leadsData } = await apolloClient.query({ query: GET_TEAMS_LEADS, fetchPolicy: 'no-cache' });
       const nodes = leadsData?.teams?.nodes || [];
       for (const t of nodes) {
         if (t.lead) leadsByTeam.set(t.id, { id: t.lead.id, name: t.lead.name });
       }
-    } catch (e) {
+    } catch {
       console.warn('Team lead field may be unsupported; continuing without leads');
     }
 
+
+    type IssueNode = {
+      id: string;
+      identifier?: string;
+      title: string;
+      estimate?: number;
+      state: { id: string; name: string; type: string; color?: string };
+      assignee?: { id: string; name: string; email?: string };
+      createdAt: string;
+      updatedAt?: string;
+      startedAt?: string;
+      completedAt?: string;
+      labels?: { nodes: { id: string; name: string; color?: string }[] };
+    };
+
+    type IssuesPage = {
+      nodes: IssueNode[];
+      pageInfo?: { hasNextPage: boolean; endCursor?: string };
+    };
+
+    type TeamNode = {
+      id: string;
+      name: string;
+      key: string;
+      color?: string;
+      issueEstimationType?: string;
+      activeCycle?: {
+        id: string;
+        number: number;
+        name?: string;
+        startsAt: string;
+        endsAt: string;
+        issues: IssuesPage;
+      };
+    };
+
+
     // Helper: paginate a cycle's issues
-    async function fetchAllCycleIssues(cycleId: string, firstPage: { nodes: any[]; pageInfo?: { hasNextPage: boolean; endCursor?: string } }): Promise<any[]> {
-      const all = [...(firstPage?.nodes || [])];
+    async function fetchAllCycleIssues(cycleId: string, firstPage: IssuesPage): Promise<IssueNode[]> {
+      const all: IssueNode[] = [...(firstPage?.nodes || [])];
       let hasNext = firstPage?.pageInfo?.hasNextPage ?? false;
       let cursor = firstPage?.pageInfo?.endCursor;
       while (hasNext) {
@@ -155,7 +192,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
 
     // Step 2: process teams and paginate cycles in parallel
     const teams: TeamMetrics[] = await Promise.all(
-      data.teams.nodes.map(async (teamData: any) => {
+      data.teams.nodes.map(async (teamData: TeamNode) => {
         const team: LinearTeam = {
           id: teamData.id,
           name: teamData.name,
@@ -183,7 +220,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
 
           try {
             const allIssueNodes = await fetchAllCycleIssues(cycle.id, teamData.activeCycle.issues);
-            issues = allIssueNodes.map((issueData: any) => ({
+            issues = allIssueNodes.map((issueData: IssueNode) => ({
               id: issueData.id,
               identifier: issueData.identifier || issueData.id,
               title: issueData.title,
