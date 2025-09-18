@@ -43,12 +43,26 @@ export interface LinearIssueState {
   color: string;
 }
 
+export interface LinearLabel {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+export interface LabelCount {
+  id: string;
+  name: string;
+  color?: string;
+  count: number;
+}
+
+
 export interface LinearIssue {
   id: string;
   identifier: string;
   title: string;
   description?: string;
-  priority: number;
+  priority?: number;
   estimate?: number;
   state: LinearIssueState;
   team: LinearTeam;
@@ -56,7 +70,9 @@ export interface LinearIssue {
   cycle?: LinearCycle | null;
   createdAt: string;
   updatedAt: string;
+  startedAt?: string;
   completedAt?: string;
+  labels?: { nodes: LinearLabel[] };
 }
 
 export interface TeamMetrics {
@@ -70,6 +86,13 @@ export interface TeamMetrics {
   completedPercentage: number;
   usesEstimation: boolean;
   metricType: 'issues' | 'story_points';
+  labelCounts?: LabelCount[];
+  meta?: {
+    avgCycleTimeMs?: number;
+    avgTriageTimeMs?: number;
+    avgOpenAgeMs?: number;
+    lead?: { id: string; name: string };
+  };
 }
 
 export interface DashboardData {
