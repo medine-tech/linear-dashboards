@@ -1,7 +1,7 @@
 import { getApolloClient } from './apollo-client';
 import type { ApolloQueryResult } from '@apollo/client';
 
-import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_MORE_CYCLE_ISSUES, GET_TEAMS_LEADS, GET_ISSUE_HISTORY } from './queries';
+import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES_LIGHT, GET_MORE_CYCLE_ISSUES, GET_TEAMS_LEADS, GET_ISSUE_HISTORY } from './queries';
 import type {
   TeamMetrics,
   DashboardData,
@@ -98,33 +98,61 @@ export async function fetchDashboardData(): Promise<DashboardData> {
   try {
     const apolloClient = getApolloClient();
 
-    // Step 1: combined query to eliminate N+1
+    // Configurable page sizes with sane defaults
+    const INITIAL_ISSUES_PAGE = Math.max(10, Math.min(100, Number(process.env.NEXT_PUBLIC_ISSUES_PAGE_INITIAL || process.env.ISSUES_PAGE_INITIAL || 50)));
+    const PAGE_N = Math.max(25, Math.min(200, Number(process.env.NEXT_PUBLIC_ISSUES_PAGE_PAGINATION || process.env.ISSUES_PAGE_PAGINATION || 100)));
+
+    // Helpers
+    type ApolloNetworkError = { statusCode?: number; result?: { errors?: Array<{ message?: string }> } };
+    type ApolloLikeError = { message?: string; networkError?: ApolloNetworkError };
+    const isComplexityError = (err: unknown): boolean => {
+      const apolloErr = err as ApolloLikeError;
+      const status = apolloErr?.networkError?.statusCode;
+      const messages = apolloErr?.networkError?.result?.errors?.map(e => (e.message || '').toLowerCase()) || [];
+      return status === 400 && messages.some(m => m.includes('complex'));
+    };
+
     let data: { teams?: { nodes?: TeamNode[] } } | undefined;
-    try {
+    let needFirstPageLabelRefetch = false;
+    let firstPageSizeUsed = INITIAL_ISSUES_PAGE;
+
+    async function runCombined(withLabels: boolean, issuesPage: number) {
+      const query = withLabels ? GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES : GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES_LIGHT;
+      console.info(`Fetching combined query (withLabels=${withLabels}) with issuesPage=${issuesPage}`);
       const result: ApolloQueryResult<{ teams: { nodes: TeamNode[] } }> = await apolloClient.query({
-        query: GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES,
-        variables: { issuesPage: 200 },
+        query,
+        variables: { issuesPage },
         fetchPolicy: 'no-cache',
       });
-      if (result.errors && result.errors.length) {
-        console.error('Linear GraphQL errors in combined query:');
-        result.errors.forEach((e) => console.error('-', e.message));
+      if (result.errors?.length) {
+        console.error('Linear GraphQL errors in combined query result:');
+        result.errors.forEach(e => console.error('-', e.message));
       }
-      data = result.data;
-    } catch (err: unknown) {
-      type ApolloNetworkError = { statusCode?: number; result?: { errors?: Array<{ message?: string }> } };
-      type ApolloLikeError = { message?: string; networkError?: ApolloNetworkError };
-      const apolloErr = err as ApolloLikeError;
-      console.error('Linear API network error in combined query');
-      const status = apolloErr?.networkError?.statusCode;
-      if (status) console.error(`HTTP ${status} from Linear API`);
-      const gqlErrors = apolloErr?.networkError?.result?.errors;
-      if (Array.isArray(gqlErrors)) {
-        gqlErrors.forEach((e) => console.error('GraphQL error:', e?.message));
-      } else if (apolloErr?.message) {
-        console.error('ApolloError message:', apolloErr.message);
+      return result.data;
+    }
+
+    // Step 1: combined query with fallbacks to avoid "Query too complex"
+    try {
+      data = await runCombined(true, INITIAL_ISSUES_PAGE);
+    } catch (err) {
+      if (isComplexityError(err)) {
+        console.warn(`Complexity error at issuesPage=${INITIAL_ISSUES_PAGE}; retrying with smaller page size`);
+        try {
+          firstPageSizeUsed = Math.min(50, INITIAL_ISSUES_PAGE);
+          data = await runCombined(true, firstPageSizeUsed);
+        } catch (err2) {
+          if (isComplexityError(err2)) {
+            console.warn(`Complexity persists at issuesPage=${firstPageSizeUsed}; switching to light query without labels`);
+            firstPageSizeUsed = 25;
+            data = await runCombined(false, firstPageSizeUsed);
+            needFirstPageLabelRefetch = true; // we'll re-fetch first page with labels per team
+          } else {
+            throw err2;
+          }
+        }
+      } else {
+        throw err;
       }
-      throw err;
     }
 
     if (!data?.teams?.nodes) {
@@ -231,9 +259,12 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       let cursor = firstPage?.pageInfo?.endCursor;
       while (hasNext) {
         try {
+
+
+
           const res = await apolloClient.query({
             query: GET_MORE_CYCLE_ISSUES,
-            variables: { cycleId, after: cursor, n: 200 },
+            variables: { cycleId, after: cursor, n: PAGE_N },
             fetchPolicy: 'no-cache',
           });
           if (res.errors && res.errors.length) {
@@ -271,6 +302,21 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           issueEstimationType: teamData.issueEstimationType,
         } as LinearTeam;
 
+
+    // Helper: fetch first page of a cycle with labels (used when light initial query omitted labels)
+    async function fetchFirstCyclePageWithLabels(cycleId: string, n: number): Promise<IssuesPage> {
+      const res = await apolloClient.query({
+        query: GET_MORE_CYCLE_ISSUES,
+        variables: { cycleId, after: null, n },
+        fetchPolicy: 'no-cache',
+      });
+      if (res.errors?.length) {
+        console.error(`GraphQL errors when refetching first page with labels for cycle ${cycleId}:`);
+        res.errors.forEach(e => console.error('-', e.message));
+      }
+      return res?.data?.cycle?.issues as IssuesPage;
+    }
+
         let cycle: LinearCycle | null = null;
         let issues: LinearIssue[] = [];
 
@@ -289,7 +335,10 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           };
 
           try {
-            const allIssueNodes = await fetchAllCycleIssues(cycle.id, teamData.activeCycle.issues);
+            const firstPage = needFirstPageLabelRefetch
+              ? await fetchFirstCyclePageWithLabels(cycle.id, firstPageSizeUsed)
+              : teamData.activeCycle.issues;
+            const allIssueNodes = await fetchAllCycleIssues(cycle.id, firstPage);
             issues = allIssueNodes.map((issueData: IssueNode) => ({
               id: issueData.id,
               identifier: issueData.identifier || issueData.id,
