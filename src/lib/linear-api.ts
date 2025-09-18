@@ -1,5 +1,5 @@
 import { getApolloClient } from './apollo-client';
-import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_MORE_CYCLE_ISSUES } from './queries';
+import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_MORE_CYCLE_ISSUES, GET_TEAMS_LEADS } from './queries';
 import type {
   TeamMetrics, 
   DashboardData, 
@@ -117,6 +117,18 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       throw new Error('No teams data received from Linear API');
     }
 
+    // Best-effort: fetch leads for all teams in one call; ignore if unsupported
+    let leadsByTeam = new Map<string, { id: string; name: string }>();
+    try {
+      const { data: leadsData } = await apolloClient.query({ query: GET_TEAMS_LEADS, fetchPolicy: 'no-cache' });
+      const nodes = leadsData?.teams?.nodes || [];
+      for (const t of nodes) {
+        if (t.lead) leadsByTeam.set(t.id, { id: t.lead.id, name: t.lead.name });
+      }
+    } catch (e) {
+      console.warn('Team lead field may be unsupported; continuing without leads');
+    }
+
     // Helper: paginate a cycle's issues
     async function fetchAllCycleIssues(cycleId: string, firstPage: { nodes: any[]; pageInfo?: { hasNextPage: boolean; endCursor?: string } }): Promise<any[]> {
       const all = [...(firstPage?.nodes || [])];
@@ -209,7 +221,38 @@ export async function fetchDashboardData(): Promise<DashboardData> {
         }
         const labelCounts = Array.from(labelMap.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
-        return { ...baseMetrics, labelCounts } as TeamMetrics;
+        // Meta: Avg cycle time (completed issues)
+        const completed = issues.filter(i => i.completedAt);
+        let avgCycleTimeMs: number | undefined;
+        if (completed.length > 0) {
+          const total = completed.reduce((sum, i) => {
+            const end = new Date(i.completedAt as string).getTime();
+            const start = new Date((i.startedAt || i.createdAt) as string).getTime();
+            return sum + Math.max(0, end - start);
+          }, 0);
+          avgCycleTimeMs = Math.round(total / completed.length);
+        }
+
+        // Meta: Avg open issue age (non-completed issues)
+        const open = issues.filter(i => !i.completedAt);
+        let avgOpenAgeMs: number | undefined;
+        if (open.length > 0) {
+          const now = Date.now();
+          const total = open.reduce((sum, i) => sum + Math.max(0, now - new Date(i.createdAt).getTime()), 0);
+          avgOpenAgeMs = Math.round(total / open.length);
+        }
+
+        // Meta: Approx triage time (startedAt - createdAt for issues that have started)
+        const startedIssues = issues.filter(i => i.startedAt);
+        let avgTriageTimeMs: number | undefined;
+        if (startedIssues.length > 0) {
+          const total = startedIssues.reduce((sum, i) => sum + Math.max(0, new Date(i.startedAt as string).getTime() - new Date(i.createdAt).getTime()), 0);
+          avgTriageTimeMs = Math.round(total / startedIssues.length);
+        }
+
+        const lead = leadsByTeam.get(team.id);
+
+        return { ...baseMetrics, labelCounts, meta: { avgCycleTimeMs, avgOpenAgeMs, avgTriageTimeMs, lead } } as TeamMetrics;
       })
     );
 

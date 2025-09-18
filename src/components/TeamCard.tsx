@@ -1,5 +1,17 @@
 import type { TeamMetrics } from '@/types/linear';
 
+
+function formatDuration(ms?: number): string {
+  if (!ms || ms <= 0) return '-';
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 interface TeamCardProps {
   teamMetrics: TeamMetrics;
 }
@@ -143,6 +155,8 @@ export default function TeamCard({ teamMetrics }: TeamCardProps) {
                     title={`${lbl.name}: ${lbl.count}`}
                   >
                     <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: lbl.color || '#9ca3af' }} />
+
+
                     <span className="text-gray-700">{lbl.name}</span>
                     <span className="text-gray-500">({lbl.count})</span>
                   </span>
@@ -155,6 +169,37 @@ export default function TeamCard({ teamMetrics }: TeamCardProps) {
               </div>
             </div>
           )}
+
+            {/* Meta row */}
+            {(teamMetrics.meta?.avgCycleTimeMs || teamMetrics.meta?.avgOpenAgeMs || teamMetrics.meta?.avgTriageTimeMs || teamMetrics.meta?.lead) && (
+              <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-gray-700">
+                {teamMetrics.meta?.avgCycleTimeMs !== undefined && (
+                  <div title="Average time from start to completion for completed issues in this cycle">
+                    <span className="mr-1">⏱</span>
+                    <span className="text-gray-600">Avg cycle:</span> {formatDuration(teamMetrics.meta.avgCycleTimeMs)}
+                  </div>
+                )}
+                {teamMetrics.meta?.avgTriageTimeMs !== undefined && (
+                  <div title="Approximate time issues spent before starting (startedAt - createdAt)">
+                    <span className="mr-1">🧹</span>
+                    <span className="text-gray-600">Avg triage:</span> {formatDuration(teamMetrics.meta.avgTriageTimeMs)}
+                  </div>
+                )}
+                {teamMetrics.meta?.avgOpenAgeMs !== undefined && (
+                  <div title="Average age of open (non-completed) issues in this cycle">
+                    <span className="mr-1">📅</span>
+                    <span className="text-gray-600">Open age:</span> {formatDuration(teamMetrics.meta.avgOpenAgeMs)}
+                  </div>
+                )}
+                {teamMetrics.meta?.lead && (
+                  <div title="Team lead">
+                    <span className="mr-1">👤</span>
+                    <span className="text-gray-600">Lead:</span> {teamMetrics.meta.lead.name}
+                  </div>
+                )}
+              </div>
+            )}
+
 
             </div>
           </div>

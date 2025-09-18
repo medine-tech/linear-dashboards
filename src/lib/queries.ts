@@ -262,3 +262,16 @@ export const GET_MORE_CYCLE_ISSUES = gql`
     }
   }
 `;
+
+
+// Optional: fetch team leads in a separate call (best-effort)
+export const GET_TEAMS_LEADS = gql`
+  query GetTeamsLeads {
+    teams {
+      nodes {
+        id
+        lead { id name }
+      }
+    }
+  }
+`;
