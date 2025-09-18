@@ -137,6 +137,7 @@ export const GET_ALL_TEAMS_WITH_CYCLES = gql`
         id
         name
         key
+        color
         issueEstimationType
         issueEstimationAllowZero
         issueEstimationExtended
@@ -199,6 +200,64 @@ export const GET_CYCLE_ISSUES_WITH_ESTIMATES = gql`
           }
           createdAt
         }
+      }
+    }
+  }
+
+// Combined query to fetch teams, active cycles, and first page of issues
+export const GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES = gql`
+  query GetTeamsWithActiveCycleIssues($issuesPage: Int = 200) {
+    teams {
+      nodes {
+        id
+        name
+        key
+        color
+        issueEstimationType
+        activeCycle {
+          id
+          number
+          name
+          startsAt
+          endsAt
+          issues(first: $issuesPage) {
+            nodes {
+              id
+              title
+              estimate
+              state { id name type }
+              labels { nodes { id name color } }
+              assignee { id name }
+              createdAt
+              startedAt
+              completedAt
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }
+  }
+`;
+
+// Pagination query for additional cycle issues pages
+export const GET_MORE_CYCLE_ISSUES = gql`
+  query GetMoreCycleIssues($cycleId: String!, $after: String, $n: Int = 200) {
+    cycle(id: $cycleId) {
+      id
+      issues(first: $n, after: $after) {
+        nodes {
+          id
+          title
+          estimate
+          state { id name type }
+          labels { nodes { id name color } }
+          assignee { id name }
+          createdAt
+          startedAt
+          completedAt
+        }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }

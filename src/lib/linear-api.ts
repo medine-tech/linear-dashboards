@@ -1,6 +1,6 @@
 import { getApolloClient } from './apollo-client';
-import { GET_ALL_TEAMS_WITH_CYCLES, GET_CYCLE_ISSUES_BY_ID, GET_CYCLE_ISSUES_WITH_ESTIMATES } from './queries';
-import type { 
+import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_MORE_CYCLE_ISSUES } from './queries';
+import type {
   TeamMetrics, 
   DashboardData, 
   LinearTeam, 
@@ -96,32 +96,20 @@ export async function fetchDashboardData(): Promise<DashboardData> {
   try {
     const apolloClient = getApolloClient();
 
+    // Step 1: combined query to eliminate N+1
     const { data, error } = await apolloClient.query({
-      query: GET_ALL_TEAMS_WITH_CYCLES,
+      query: GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES,
+      variables: { issuesPage: 200 },
       fetchPolicy: 'no-cache',
     });
 
     if (error) {
       console.error('Linear API Error:', error.message);
-
-      // Log network errors for production debugging
       if (error.networkError) {
-        const networkError = error.networkError as {
-          statusCode?: number;
-          result?: { errors?: Array<{ message: string }> };
-        };
-
-        if (networkError.statusCode) {
-          console.error(`HTTP ${networkError.statusCode} error from Linear API`);
-        }
-
-        if (networkError.result?.errors) {
-          networkError.result.errors.forEach((gqlError) => {
-            console.error('Linear API Error:', gqlError.message);
-          });
-        }
+        const networkError = error.networkError as { statusCode?: number; result?: { errors?: Array<{ message: string }> } };
+        if (networkError.statusCode) console.error(`HTTP ${networkError.statusCode} error from Linear API`);
+        networkError.result?.errors?.forEach(gqlError => console.error('Linear API Error:', gqlError.message));
       }
-
       throw new Error(`Failed to fetch teams data: ${error.message}`);
     }
 
@@ -129,60 +117,61 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       throw new Error('No teams data received from Linear API');
     }
 
-    // Process teams and fetch issues for each active cycle
-    const teams: TeamMetrics[] = [];
+    // Helper: paginate a cycle's issues
+    async function fetchAllCycleIssues(cycleId: string, firstPage: { nodes: any[]; pageInfo?: { hasNextPage: boolean; endCursor?: string } }): Promise<any[]> {
+      const all = [...(firstPage?.nodes || [])];
+      let hasNext = firstPage?.pageInfo?.hasNextPage ?? false;
+      let cursor = firstPage?.pageInfo?.endCursor;
+      while (hasNext) {
+        const { data: more, error: moreError } = await apolloClient.query({
+          query: GET_MORE_CYCLE_ISSUES,
+          variables: { cycleId, after: cursor, n: 200 },
+          fetchPolicy: 'no-cache',
+        });
+        if (moreError) {
+          console.error(`Pagination error for cycle ${cycleId}:`, moreError.message);
+          break;
+        }
+        const page = more?.cycle?.issues;
+        if (!page?.nodes?.length) break;
+        all.push(...page.nodes);
+        hasNext = page.pageInfo?.hasNextPage ?? false;
+        cursor = page.pageInfo?.endCursor;
+      }
+      return all;
+    }
 
-    for (const teamData of data.teams.nodes) {
-      const team: LinearTeam = {
-        id: teamData.id,
-        name: teamData.name,
-        key: teamData.key,
-        issueEstimationType: teamData.issueEstimationType,
-        issueEstimationAllowZero: teamData.issueEstimationAllowZero,
-        issueEstimationExtended: teamData.issueEstimationExtended,
-      };
+    // Step 2: process teams and paginate cycles in parallel
+    const teams: TeamMetrics[] = await Promise.all(
+      data.teams.nodes.map(async (teamData: any) => {
+        const team: LinearTeam = {
+          id: teamData.id,
+          name: teamData.name,
+          key: teamData.key,
+          color: teamData.color,
+          issueEstimationType: teamData.issueEstimationType,
+        } as LinearTeam;
 
-      let cycle: LinearCycle | null = null;
-      let issues: LinearIssue[] = [];
+        let cycle: LinearCycle | null = null;
+        let issues: LinearIssue[] = [];
 
-      if (teamData.activeCycle) {
-        cycle = {
-          id: teamData.activeCycle.id,
-          number: teamData.activeCycle.number,
-          name: teamData.activeCycle.name,
-          startsAt: teamData.activeCycle.startsAt,
-          endsAt: teamData.activeCycle.endsAt,
-          team,
-          progress: 0, // We'll calculate this from issues
-          scopeHistory: [],
-          completedScopeHistory: [],
-          inProgressScopeHistory: [],
-        };
+        if (teamData.activeCycle) {
+          cycle = {
+            id: teamData.activeCycle.id,
+            number: teamData.activeCycle.number,
+            name: teamData.activeCycle.name,
+            startsAt: teamData.activeCycle.startsAt,
+            endsAt: teamData.activeCycle.endsAt,
+            team,
+            progress: 0,
+            scopeHistory: [],
+            completedScopeHistory: [],
+            inProgressScopeHistory: [],
+          };
 
-        // Fetch issues for this cycle using appropriate query based on estimation settings
-        try {
-          const usesEstimation = teamUsesEstimation(team);
-          const issuesQuery = usesEstimation ? GET_CYCLE_ISSUES_WITH_ESTIMATES : GET_CYCLE_ISSUES_BY_ID;
-
-          const { data: issuesData, error: issuesError } = await apolloClient.query({
-            query: issuesQuery,
-            variables: { cycleId: cycle.id },
-            fetchPolicy: 'no-cache',
-          });
-
-          if (issuesError) {
-            console.error(`Error fetching issues for cycle ${cycle.id}:`, issuesError.message);
-          } else if (issuesData?.cycle?.issues?.nodes) {
-            issues = issuesData.cycle.issues.nodes.map((issueData: {
-              id: string;
-              identifier?: string;
-              title: string;
-              estimate?: number;
-              state: { id: string; name: string; type: string; color?: string };
-              assignee?: { id: string; name: string; email?: string };
-              createdAt: string;
-              updatedAt?: string;
-            }) => ({
+          try {
+            const allIssueNodes = await fetchAllCycleIssues(cycle.id, teamData.activeCycle.issues);
+            issues = allIssueNodes.map((issueData: any) => ({
               id: issueData.id,
               identifier: issueData.identifier || issueData.id,
               title: issueData.title,
@@ -194,30 +183,37 @@ export async function fetchDashboardData(): Promise<DashboardData> {
                 color: issueData.state.color || '#000000',
               },
               team,
-              assignee: issueData.assignee ? {
-                id: issueData.assignee.id,
-                name: issueData.assignee.name,
-                email: issueData.assignee.email || '',
-              } : undefined,
+              assignee: issueData.assignee ? { id: issueData.assignee.id, name: issueData.assignee.name, email: issueData.assignee.email || '' } : undefined,
               cycle,
               createdAt: issueData.createdAt,
               updatedAt: issueData.updatedAt || issueData.createdAt,
+              startedAt: issueData.startedAt,
+              completedAt: issueData.completedAt,
+              labels: issueData.labels,
             }));
+          } catch (err) {
+            console.error(`Failed to fetch or map issues for cycle ${cycle.id}:`, err);
           }
-        } catch (issueError) {
-          console.error(`Failed to fetch issues for cycle ${cycle.id}:`, issueError);
-          // Continue processing other teams even if one cycle fails
         }
-      }
 
-      const teamMetrics = calculateTeamMetrics(team, cycle, issues);
-      teams.push(teamMetrics);
-    }
+        const baseMetrics = calculateTeamMetrics(team, cycle, issues);
 
-    return {
-      teams,
-      lastUpdated: new Date().toISOString(),
-    };
+        // Compute label counts (labels with count > 0)
+        const labelMap = new Map<string, { id: string; name: string; color?: string; count: number }>();
+        for (const issue of issues) {
+          const labelNodes = issue.labels?.nodes || [];
+          for (const lbl of labelNodes) {
+            const prev = labelMap.get(lbl.id);
+            labelMap.set(lbl.id, { id: lbl.id, name: lbl.name, color: lbl.color, count: (prev?.count || 0) + 1 });
+          }
+        }
+        const labelCounts = Array.from(labelMap.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+        return { ...baseMetrics, labelCounts } as TeamMetrics;
+      })
+    );
+
+    return { teams, lastUpdated: new Date().toISOString() };
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
     throw error;

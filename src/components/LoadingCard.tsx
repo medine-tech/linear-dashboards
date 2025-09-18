@@ -45,7 +45,7 @@ export default function LoadingCard() {
             <div className="h-2 bg-gray-300 rounded-full w-1/3" />
           </div>
         </div>
-        
+
         <div>
           <div className="flex justify-between mb-1">
             <div className="h-4 bg-gray-300 rounded w-28" />
@@ -55,6 +55,17 @@ export default function LoadingCard() {
             <div className="h-2 bg-gray-300 rounded-full w-1/4" />
           </div>
         </div>
+
+      {/* Labels Skeleton */}
+      <div className="mt-6">
+        <div className="h-4 bg-gray-300 rounded w-20 mb-2" />
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-6 bg-gray-200 rounded-full w-20" />
+          ))}
+        </div>
+      </div>
+
       </div>
     </div>
   );

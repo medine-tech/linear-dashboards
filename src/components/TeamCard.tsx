@@ -47,6 +47,7 @@ export default function TeamCard({ teamMetrics }: TeamCardProps) {
           <div
             className="w-4 h-4 rounded-full"
             style={{ backgroundColor: team.color || '#6366f1' }}
+            title={team.color ? `Team color: ${team.color}` : undefined}
           />
           <div>
             <h3 className="text-lg font-semibold text-gray-900">{team.name}</h3>
@@ -110,24 +111,51 @@ export default function TeamCard({ teamMetrics }: TeamCardProps) {
                 <span className="text-gray-900 font-medium">{startedPercentage}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
+                <div
                   className={`h-2 rounded-full transition-all duration-300 ${getProgressBarColor(startedPercentage)}`}
                   style={{ width: `${startedPercentage}%` }}
                 />
               </div>
             </div>
-            
+
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-gray-600">Completion Progress</span>
                 <span className="text-gray-900 font-medium">{completedPercentage}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
+                <div
                   className={`h-2 rounded-full transition-all duration-300 ${getProgressBarColor(completedPercentage)}`}
                   style={{ width: `${completedPercentage}%` }}
                 />
               </div>
+
+          {/* Top Labels */}
+          {teamMetrics.labelCounts && teamMetrics.labelCounts.length > 0 && (
+            <div className="mt-6">
+              <div className="text-sm text-gray-600 mb-2">Top Labels</div>
+              <div className="flex flex-wrap gap-2">
+                {teamMetrics.labelCounts!.slice(0, 6).map(lbl => (
+                  <span
+                    key={lbl.id}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border"
+                    style={{ borderColor: lbl.color || '#e5e7eb' }}
+                    title={`${lbl.name}: ${lbl.count}`}
+                  >
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: lbl.color || '#9ca3af' }} />
+                    <span className="text-gray-700">{lbl.name}</span>
+                    <span className="text-gray-500">({lbl.count})</span>
+                  </span>
+                ))}
+                {teamMetrics.labelCounts.length > 6 && (
+                  <span className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
+                    +{teamMetrics.labelCounts.length - 6} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
             </div>
           </div>
         </>
