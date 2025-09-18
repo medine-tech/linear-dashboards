@@ -277,3 +277,21 @@ export const GET_TEAMS_LEADS = gql`
     }
   }
 `;
+
+
+
+// Optional: issue history for accurate triage time (behind feature flag)
+export const GET_ISSUE_HISTORY = gql`
+  query GetIssueHistory($issueId: String!, $first: Int = 20) {
+    issue(id: $issueId) {
+      id
+      history(first: $first) {
+        nodes {
+          createdAt
+          fromState { type }
+          toState { type }
+        }
+      }
+    }
+  }
+`;

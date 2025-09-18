@@ -1,5 +1,7 @@
 import { getApolloClient } from './apollo-client';
-import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_MORE_CYCLE_ISSUES, GET_TEAMS_LEADS } from './queries';
+import type { ApolloQueryResult } from '@apollo/client';
+
+import { GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES, GET_MORE_CYCLE_ISSUES, GET_TEAMS_LEADS, GET_ISSUE_HISTORY } from './queries';
 import type {
   TeamMetrics,
   DashboardData,
@@ -97,20 +99,32 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     const apolloClient = getApolloClient();
 
     // Step 1: combined query to eliminate N+1
-    const { data, error } = await apolloClient.query({
-      query: GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES,
-      variables: { issuesPage: 200 },
-      fetchPolicy: 'no-cache',
-    });
-
-    if (error) {
-      console.error('Linear API Error:', error.message);
-      if (error.networkError) {
-        const networkError = error.networkError as { statusCode?: number; result?: { errors?: Array<{ message: string }> } };
-        if (networkError.statusCode) console.error(`HTTP ${networkError.statusCode} error from Linear API`);
-        networkError.result?.errors?.forEach(gqlError => console.error('Linear API Error:', gqlError.message));
+    let data: { teams?: { nodes?: TeamNode[] } } | undefined;
+    try {
+      const result: ApolloQueryResult<{ teams: { nodes: TeamNode[] } }> = await apolloClient.query({
+        query: GET_TEAMS_WITH_ACTIVE_CYCLE_ISSUES,
+        variables: { issuesPage: 200 },
+        fetchPolicy: 'no-cache',
+      });
+      if (result.errors && result.errors.length) {
+        console.error('Linear GraphQL errors in combined query:');
+        result.errors.forEach((e) => console.error('-', e.message));
       }
-      throw new Error(`Failed to fetch teams data: ${error.message}`);
+      data = result.data;
+    } catch (err: unknown) {
+      type ApolloNetworkError = { statusCode?: number; result?: { errors?: Array<{ message?: string }> } };
+      type ApolloLikeError = { message?: string; networkError?: ApolloNetworkError };
+      const apolloErr = err as ApolloLikeError;
+      console.error('Linear API network error in combined query');
+      const status = apolloErr?.networkError?.statusCode;
+      if (status) console.error(`HTTP ${status} from Linear API`);
+      const gqlErrors = apolloErr?.networkError?.result?.errors;
+      if (Array.isArray(gqlErrors)) {
+        gqlErrors.forEach((e) => console.error('GraphQL error:', e?.message));
+      } else if (apolloErr?.message) {
+        console.error('ApolloError message:', apolloErr.message);
+      }
+      throw err;
     }
 
     if (!data?.teams?.nodes) {
@@ -165,6 +179,50 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       };
     };
 
+    const ENABLE_ACCURATE_TRIAGE = (process.env.NEXT_PUBLIC_ENABLE_ACCURATE_TRIAGE === 'true' || process.env.ENABLE_ACCURATE_TRIAGE === 'true');
+
+    type HistoryNode = {
+      createdAt: string;
+      fromState?: { type?: string } | null;
+      toState?: { type?: string } | null;
+    };
+
+    async function computeAccurateTriageAvg(issuesForTeam: LinearIssue[]): Promise<number | undefined> {
+      const TRIAGE_FROM_TYPES = new Set(['triage', 'backlog']);
+      const MAX_HISTORY_ISSUES = 40;
+      const sample = issuesForTeam.slice(0, MAX_HISTORY_ISSUES);
+      if (sample.length === 0) return undefined;
+
+      const apolloClient = getApolloClient();
+      const durations: number[] = [];
+
+      await Promise.all(
+        sample.map(async (iss) => {
+          try {
+            const { data } = await apolloClient.query({ query: GET_ISSUE_HISTORY, variables: { issueId: iss.id, first: 20 }, fetchPolicy: 'no-cache' });
+            const nodes: HistoryNode[] = data?.issue?.history?.nodes || [];
+            const createdAtMs = new Date(iss.createdAt).getTime();
+            const leaving = nodes.find(n => TRIAGE_FROM_TYPES.has((n.fromState?.type || '').toLowerCase()) && (n.toState?.type || '').toLowerCase() !== 'triage');
+            if (leaving) {
+              const leftMs = new Date(leaving.createdAt).getTime();
+              const d = Math.max(0, leftMs - createdAtMs);
+              if (d > 0) durations.push(d);
+              return;
+            }
+            if (iss.startedAt) {
+              const d = Math.max(0, new Date(iss.startedAt).getTime() - createdAtMs);
+              if (d > 0) durations.push(d);
+            }
+          } catch {
+            // ignore per-issue errors
+          }
+        })
+      );
+
+      if (durations.length === 0) return undefined;
+      return Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+    }
+
 
     // Helper: paginate a cycle's issues
     async function fetchAllCycleIssues(cycleId: string, firstPage: IssuesPage): Promise<IssueNode[]> {
@@ -172,20 +230,32 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       let hasNext = firstPage?.pageInfo?.hasNextPage ?? false;
       let cursor = firstPage?.pageInfo?.endCursor;
       while (hasNext) {
-        const { data: more, error: moreError } = await apolloClient.query({
-          query: GET_MORE_CYCLE_ISSUES,
-          variables: { cycleId, after: cursor, n: 200 },
-          fetchPolicy: 'no-cache',
-        });
-        if (moreError) {
-          console.error(`Pagination error for cycle ${cycleId}:`, moreError.message);
+        try {
+          const res = await apolloClient.query({
+            query: GET_MORE_CYCLE_ISSUES,
+            variables: { cycleId, after: cursor, n: 200 },
+            fetchPolicy: 'no-cache',
+          });
+          if (res.errors && res.errors.length) {
+            console.error(`GraphQL errors during pagination for cycle ${cycleId}:`);
+            res.errors.forEach((e) => console.error('-', e.message));
+          }
+          const page = res?.data?.cycle?.issues;
+          if (!page?.nodes?.length) break;
+          all.push(...page.nodes);
+          hasNext = page.pageInfo?.hasNextPage ?? false;
+          cursor = page.pageInfo?.endCursor;
+        } catch (err: unknown) {
+          type ApolloNetworkError = { statusCode?: number; result?: { errors?: Array<{ message?: string }> } };
+          type ApolloLikeError = { message?: string; networkError?: ApolloNetworkError };
+          const apolloErr = err as ApolloLikeError;
+          console.error(`Network error during pagination for cycle ${cycleId}`);
+          const status = apolloErr?.networkError?.statusCode;
+          if (status) console.error(`HTTP ${status} from Linear API`);
+          const gqlErrors = apolloErr?.networkError?.result?.errors;
+          if (Array.isArray(gqlErrors)) gqlErrors.forEach((e) => console.error('GraphQL error:', e?.message));
           break;
         }
-        const page = more?.cycle?.issues;
-        if (!page?.nodes?.length) break;
-        all.push(...page.nodes);
-        hasNext = page.pageInfo?.hasNextPage ?? false;
-        cursor = page.pageInfo?.endCursor;
       }
       return all;
     }
@@ -286,6 +356,13 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           const total = startedIssues.reduce((sum, i) => sum + Math.max(0, new Date(i.startedAt as string).getTime() - new Date(i.createdAt).getTime()), 0);
           avgTriageTimeMs = Math.round(total / startedIssues.length);
         }
+
+        // Optional override with accurate triage when enabled
+        if (ENABLE_ACCURATE_TRIAGE) {
+          const accurate = await computeAccurateTriageAvg(issues);
+          if (accurate !== undefined) avgTriageTimeMs = accurate;
+        }
+
 
         const lead = leadsByTeam.get(team.id);
 
