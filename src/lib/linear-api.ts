@@ -105,11 +105,23 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     // Helpers
     type ApolloNetworkError = { statusCode?: number; result?: { errors?: Array<{ message?: string }> } };
     type ApolloLikeError = { message?: string; networkError?: ApolloNetworkError };
-    const isComplexityError = (err: unknown): boolean => {
-      const apolloErr = err as ApolloLikeError;
-      const status = apolloErr?.networkError?.statusCode;
-      const messages = apolloErr?.networkError?.result?.errors?.map(e => (e.message || '').toLowerCase()) || [];
-      return status === 400 && messages.some(m => m.includes('complex'));
+
+    const hasComplexityMessageFromErrors = (errors?: Array<{ message?: string }>): boolean => {
+      const msgs = (errors || []).map(e => (e?.message || '').toLowerCase());
+      return msgs.some(m => m.includes('complex'));
+    };
+
+    const isComplexityError = (errOrErrors: unknown): boolean => {
+      if (Array.isArray(errOrErrors)) return hasComplexityMessageFromErrors(errOrErrors as Array<{ message?: string }>);
+      const apolloErr = errOrErrors as ApolloLikeError;
+      if (apolloErr?.networkError?.result?.errors) {
+        if (hasComplexityMessageFromErrors(apolloErr.networkError.result.errors)) return true;
+      }
+      if (errOrErrors instanceof Error) {
+        const msg = (errOrErrors.message || '').toLowerCase();
+        if (msg.includes('complex')) return true;
+      }
+      return false;
     };
 
     let data: { teams?: { nodes?: TeamNode[] } } | undefined;
@@ -127,6 +139,11 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       if (result.errors?.length) {
         console.error('Linear GraphQL errors in combined query result:');
         result.errors.forEach(e => console.error('-', e.message));
+        if (isComplexityError(result.errors)) {
+          const e = new Error('Query too complex (result.errors)');
+          e.name = 'ComplexityError';
+          throw e;
+        }
       }
       return result.data;
     }
@@ -218,15 +235,21 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     async function computeAccurateTriageAvg(issuesForTeam: LinearIssue[]): Promise<number | undefined> {
       const TRIAGE_FROM_TYPES = new Set(['triage', 'backlog']);
       const MAX_HISTORY_ISSUES = 40;
+      const CONCURRENCY = Math.max(1, Math.min(10, Number(process.env.NEXT_PUBLIC_HISTORY_CONCURRENCY || process.env.HISTORY_CONCURRENCY || 6)));
       const sample = issuesForTeam.slice(0, MAX_HISTORY_ISSUES);
       if (sample.length === 0) return undefined;
 
       const apolloClient = getApolloClient();
       const durations: number[] = [];
 
-      await Promise.all(
-        sample.map(async (iss) => {
-          try {
+      // Process in small concurrent batches to avoid overwhelming the API
+      const chunks: LinearIssue[][] = [];
+      for (let i = 0; i < sample.length; i += CONCURRENCY) {
+        chunks.push(sample.slice(i, i + CONCURRENCY));
+      }
+      for (const group of chunks) {
+        const results = await Promise.allSettled(
+          group.map(async (iss) => {
             const { data } = await apolloClient.query({ query: GET_ISSUE_HISTORY, variables: { issueId: iss.id, first: 20 }, fetchPolicy: 'no-cache' });
             const nodes: HistoryNode[] = data?.issue?.history?.nodes || [];
             const createdAtMs = new Date(iss.createdAt).getTime();
@@ -241,11 +264,11 @@ export async function fetchDashboardData(): Promise<DashboardData> {
               const d = Math.max(0, new Date(iss.startedAt).getTime() - createdAtMs);
               if (d > 0) durations.push(d);
             }
-          } catch {
-            // ignore per-issue errors
-          }
-        })
-      );
+          })
+        );
+        // Ignore rejections per-request; continue to next batch
+        results.forEach(() => { /* noop: errors are intentionally ignored */ });
+      }
 
       if (durations.length === 0) return undefined;
       return Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
@@ -257,7 +280,16 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       const all: IssueNode[] = [...(firstPage?.nodes || [])];
       let hasNext = firstPage?.pageInfo?.hasNextPage ?? false;
       let cursor = firstPage?.pageInfo?.endCursor;
+      const MAX_PAGES = Math.max(1, Math.min(1000, Number(process.env.NEXT_PUBLIC_MAX_PAGES || process.env.MAX_PAGES || 100)));
+      let pageCounter = 0;
+      let prevCursor: string | undefined = undefined;
+
       while (hasNext) {
+        if (pageCounter >= MAX_PAGES) {
+          console.warn(`Aborting pagination for cycle ${cycleId}: reached MAX_PAGES=${MAX_PAGES}`);
+          break;
+        }
+
         try {
 
 
@@ -270,12 +302,23 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           if (res.errors && res.errors.length) {
             console.error(`GraphQL errors during pagination for cycle ${cycleId}:`);
             res.errors.forEach((e) => console.error('-', e.message));
+            if (isComplexityError(res.errors)) {
+              console.warn(`Stopping pagination for cycle ${cycleId} due to complexity in result.errors`);
+              break;
+            }
           }
           const page = res?.data?.cycle?.issues;
           if (!page?.nodes?.length) break;
           all.push(...page.nodes);
           hasNext = page.pageInfo?.hasNextPage ?? false;
-          cursor = page.pageInfo?.endCursor;
+          const newCursor = page.pageInfo?.endCursor;
+          prevCursor = cursor;
+          cursor = newCursor;
+          pageCounter += 1;
+          if (prevCursor && prevCursor === cursor) {
+            console.warn(`Stopping pagination for cycle ${cycleId} due to stale cursor: ${cursor}`);
+            break;
+          }
         } catch (err: unknown) {
           type ApolloNetworkError = { statusCode?: number; result?: { errors?: Array<{ message?: string }> } };
           type ApolloLikeError = { message?: string; networkError?: ApolloNetworkError };
@@ -284,7 +327,13 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           const status = apolloErr?.networkError?.statusCode;
           if (status) console.error(`HTTP ${status} from Linear API`);
           const gqlErrors = apolloErr?.networkError?.result?.errors;
-          if (Array.isArray(gqlErrors)) gqlErrors.forEach((e) => console.error('GraphQL error:', e?.message));
+          if (Array.isArray(gqlErrors)) {
+            gqlErrors.forEach((e) => console.error('GraphQL error:', e?.message));
+            if (isComplexityError(gqlErrors)) {
+              console.warn(`Stopping pagination for cycle ${cycleId} due to complexity in networkError.result.errors`);
+              break;
+            }
+          }
           break;
         }
       }
